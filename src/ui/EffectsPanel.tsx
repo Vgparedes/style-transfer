@@ -45,7 +45,7 @@ export function EffectsPanel() {
               <span className="min-w-0">
                 <span className={cx('flex items-center gap-1.5 text-[12.5px] font-medium', active ? 'text-ink' : 'text-ink')}>
                   {e.name}
-                  {e.vector && <span className="rounded bg-panel-2 px-1 py-px text-[9px] font-semibold tracking-wide text-ink-3 ring-1 ring-line">SVG</span>}
+                  {(e.vector || e.svgExport) && <span className="rounded bg-panel-2 px-1 py-px text-[9px] font-semibold tracking-wide text-ink-3 ring-1 ring-line">SVG</span>}
                 </span>
                 <span className="mt-0.5 block text-[11px] leading-snug text-ink-3">{e.description}</span>
               </span>

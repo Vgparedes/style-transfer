@@ -12,8 +12,8 @@ import { RenderClient } from './worker/client';
 import { cx } from './ui/controls';
 
 const SAMPLES = [
-  { url: '/samples/girasoles.svg', name: 'girasoles.svg', label: 'Girasoles (dibujo lineal)' },
-  { url: '/samples/esfera.png', name: 'esfera.png', label: 'Esfera (sombreado tonal)' },
+  { url: `${import.meta.env.BASE_URL}samples/girasoles.svg`, name: 'girasoles.svg', label: 'Girasoles (dibujo lineal)' },
+  { url: `${import.meta.env.BASE_URL}samples/esfera.png`, name: 'esfera.png', label: 'Esfera (sombreado tonal)' },
 ];
 
 export default function App() {

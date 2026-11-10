@@ -74,6 +74,8 @@ export interface PolygonsLayer {
   colors?: Uint32Array;
   opacity: number;
   blend?: BlendMode;
+  /** Regla de relleno par-impar (para contornos con huecos). */
+  evenOdd?: boolean;
 }
 
 export type SceneLayer = CirclesLayer | SquaresLayer | PolylinesLayer | PolygonsLayer;
@@ -111,6 +113,11 @@ export interface EffectContext {
    * necesita los colores originales.
    */
   original: RGBAImage;
+  /**
+   * true solo al exportar SVG: los efectos raster que saben vectorizarse
+   * devuelven además una escena (en la vista previa no se calcula).
+   */
+  wantVector?: boolean;
 }
 
 export type ParamValue = number | string | boolean;
@@ -167,6 +174,8 @@ export interface EffectDefinition {
   description: string;
   /** Indica si el resultado es vectorial (se ofrece exportar SVG). */
   vector: boolean;
+  /** Efecto raster que igualmente puede exportarse como SVG (vectorizado). */
+  svgExport?: boolean;
   params: ParamSpec[];
   defaults: EffectParams;
   presets: Preset[];

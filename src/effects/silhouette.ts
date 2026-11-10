@@ -1,5 +1,8 @@
-import type { EffectDefinition } from '../engine/types';
-import { createImage, gaussianBlur, luminance, parseHex } from '../engine/image';
+import type { EffectDefinition, SceneLayer } from '../engine/types';
+import { isoContours, polygonArea } from '../engine/contours';
+import { simplifyPolyline } from '../engine/trace';
+import { PathBuilder } from '../engine/scene';
+import { createImage, gaussianBlur, luminance, parseHex, toHex } from '../engine/image';
 
 /**
  * SILUETA
@@ -12,6 +15,7 @@ export const silhouette: EffectDefinition = {
   name: 'Silueta',
   description: 'Formas planas simplificadas a partir de un umbral.',
   vector: false,
+  svgExport: true,
   params: [
     { key: 'threshold', type: 'range', label: 'Umbral', min: 0.02, max: 0.98, step: 0.01 },
     { key: 'levels', type: 'range', label: 'Cantidad de colores', min: 2, max: 6, step: 1 },
@@ -73,9 +77,42 @@ export const silhouette: EffectDefinition = {
         }
       }
     }
-    return { raster: out };
+    if (!ctx.wantVector) return { raster: out };
+
+    // SVG: contornos de cada banda (marching squares sobre la misma imagen
+    // desenfocada que usa el raster). Se pintan de la banda más clara a la
+    // más oscura; cada región contiene a la siguiente.
+    const field = inv ? { width: w, height: h, data: lum.data.map((v) => 1 - v) } : lum;
+    const minArea = Math.max(1, ctx.scale * ctx.scale * 2);
+    const eps = 0.35;
+    const layers: SceneLayer[] = [];
+    for (let j = cuts.length - 1; j >= 0; j--) {
+      const f = j / (levels - 1);
+      const { rgb, alpha } = bandColor(f, levels, ink, light, bg);
+      const pb = new PathBuilder();
+      for (const loop of isoContours(field, cuts[j])) {
+        if (Math.abs(polygonArea(loop)) < minArea) continue;
+        pb.add(simplifyPolyline([...loop, loop[0], loop[1]], eps).slice(0, -2), true);
+      }
+      if (!pb.size) continue;
+      const b = pb.build();
+      layers.push({ kind: 'polygons', points: b.points, offsets: b.offsets, fill: toHex((rgb[0] << 16) | (rgb[1] << 8) | rgb[2]), opacity: alpha, evenOdd: true });
+    }
+    return { raster: out, scene: { width: w, height: h, background: ctx.background, layers } };
   },
 };
+
+/** Color y opacidad de una banda (misma fórmula que el raster). */
+function bandColor(f: number, levels: number, ink: number[], light: number[], bg: number[] | null) {
+  const lerp = (a: number[], b: number[], t: number) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  if (levels === 2 || f <= 0) {
+    return bg ? { rgb: lerp(ink, bg, f), alpha: 1 } : { rgb: ink, alpha: 1 - f };
+  }
+  const mid = (levels - 2) / (levels - 1);
+  if (f < mid) return { rgb: lerp(ink, light, f / mid), alpha: 1 };
+  const t = (f - mid) / (1 - mid);
+  return bg ? { rgb: lerp(light, bg, t), alpha: 1 } : { rgb: light, alpha: 1 - t };
+}
 
 function mix(o: Uint8ClampedArray, k: number, c: number[], bg: number[] | null, t: number) {
   if (bg) {

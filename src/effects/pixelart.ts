@@ -1,5 +1,5 @@
-import type { EffectDefinition } from '../engine/types';
-import { createImage, parseHex } from '../engine/image';
+import type { EffectDefinition, SceneLayer } from '../engine/types';
+import { createImage, parseHex, toHex } from '../engine/image';
 import { medianCut, nearest, type RGB } from '../engine/quantize';
 
 /**
@@ -29,6 +29,7 @@ export const pixelart: EffectDefinition = {
   name: 'Pixel Art',
   description: 'Gráficos pixelados con paleta limitada y dithering.',
   vector: false,
+  svgExport: true,
   params: [
     { key: 'pixelSize', type: 'range', label: 'Tamaño del píxel', min: 2, max: 64, step: 1, unit: 'px', pixels: true },
     {
@@ -57,8 +58,22 @@ export const pixelart: EffectDefinition = {
       ],
     },
     { key: 'ditherStrength', type: 'range', label: 'Intensidad del dithering', min: 0, max: 1, step: 0.01, visibleIf: (p) => p.dither !== 'none' },
+    { key: 'removeBg', type: 'toggle', label: 'Reemplazar fondo de la imagen', group: 'Fondo de la imagen', hint: 'Detecta el fondo liso de la imagen (p. ej. blanco) y lo reemplaza por el color de fondo elegido o por transparencia.' },
+    {
+      key: 'bgScope',
+      type: 'segmented',
+      label: 'Zonas a reemplazar',
+      group: 'Fondo de la imagen',
+      visibleIf: (p) => !!p.removeBg,
+      options: [
+        { value: 'connected', label: 'Desde el borde' },
+        { value: 'all', label: 'Todas' },
+      ],
+      hint: 'Todas: también los huecos encerrados del mismo color (útil en dibujos).',
+    },
+    { key: 'bgTolerance', type: 'range', label: 'Tolerancia del fondo', min: 0.05, max: 1, step: 0.01, group: 'Fondo de la imagen', visibleIf: (p) => !!p.removeBg },
   ],
-  defaults: { pixelSize: 8, palette: 'auto', colors: 16, dither: 'bayer', ditherStrength: 0.5 },
+  defaults: { pixelSize: 8, palette: 'auto', colors: 16, dither: 'bayer', ditherStrength: 0.5, removeBg: true, bgScope: 'connected', bgTolerance: 0.3 },
   presets: [
     { id: '8bit', name: '8 bits', params: { pixelSize: 8, palette: 'retro16', dither: 'bayer', ditherStrength: 0.4 } },
     { id: 'handheld', name: 'Portátil', params: { pixelSize: 6, palette: 'green4', dither: 'bayer', ditherStrength: 0.6 } },
@@ -94,6 +109,11 @@ export const pixelart: EffectDefinition = {
         alpha[c] = n ? a / n : 0;
       }
     }
+    // 1b) Fondo de la imagen: en imágenes opacas (foto sobre papel blanco,
+    //     etc.) el fondo es un color más. Se detecta el color dominante del
+    //     borde y se marca como transparente la zona conectada a él, así el
+    //     color de fondo elegido (o la transparencia) se aplica también acá.
+    if (p.removeBg) removeBackground(cells, alpha, gw, gh, (p.bgTolerance as number) * 120, p.bgScope === 'all');
     // 2) Paleta.
     let pal: RGB[];
     if (p.palette === 'auto') {
@@ -162,6 +182,91 @@ export const pixelart: EffectDefinition = {
         }
       }
     }
-    return { raster: out, info: `${gw}×${gh} píxeles · ${pal.length} colores` };
+    const info = `${gw}×${gh} píxeles · ${pal.length} colores`;
+    if (!ctx.wantVector) return { raster: out, info };
+
+    // SVG: tiras horizontales de bloques del mismo color, agrupadas por
+    // color de la paleta (un <path> por color → archivo liviano). Se solapan
+    // un poco para que los visores no muestren líneas finas entre bloques.
+    const ov = Math.min(0.5, ps * 0.04);
+    const byColor: number[][] = pal.map(() => []);
+    for (let gy = 0; gy < gh; gy++) {
+      let gx = 0;
+      while (gx < gw) {
+        const c = gy * gw + gx;
+        if (alpha[c] <= 0.5) {
+          gx++;
+          continue;
+        }
+        const j = idx[c];
+        let end = gx + 1;
+        while (end < gw && alpha[gy * gw + end] > 0.5 && idx[gy * gw + end] === j) end++;
+        const x0 = gx * ps, y0 = gy * ps;
+        const x1 = Math.min(w, end * ps + (end < gw ? ov : 0));
+        const y1 = Math.min(h, (gy + 1) * ps + (gy + 1 < gh ? ov : 0));
+        byColor[j].push(x0, y0, x1, y0, x1, y1, x0, y1);
+        gx = end;
+      }
+    }
+    const layers: SceneLayer[] = [];
+    pal.forEach((col, j) => {
+      const flat = byColor[j];
+      if (!flat.length) return;
+      const n = flat.length / 8;
+      const offsets = new Uint32Array(n);
+      for (let k = 0; k < n; k++) offsets[k] = k * 4;
+      layers.push({ kind: 'polygons', points: new Float32Array(flat), offsets, fill: toHex((col[0] << 16) | (col[1] << 8) | col[2]), opacity: 1 });
+    });
+    return { raster: out, scene: { width: w, height: h, background: ctx.background, layers }, info };
   },
 };
+
+/**
+ * Marca como transparentes (alpha = 0) las celdas del fondo: el color más
+ * frecuente del borde, y solo la zona conectada al borde (un blanco en el
+ * interior del motivo se conserva). Si el borde no tiene un color dominante
+ * (foto sin fondo liso), no hace nada.
+ */
+function removeBackground(cells: Float32Array, alpha: Float32Array, gw: number, gh: number, tol: number, everywhere: boolean) {
+  const border: number[] = [];
+  for (let x = 0; x < gw; x++) border.push(x, (gh - 1) * gw + x);
+  for (let y = 1; y < gh - 1; y++) border.push(y * gw, y * gw + gw - 1);
+  const buckets = new Map<number, { n: number; r: number; g: number; b: number }>();
+  let total = 0;
+  for (const c of border) {
+    if (alpha[c] <= 0.5) continue;
+    const r = cells[c * 3], g = cells[c * 3 + 1], b = cells[c * 3 + 2];
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n++;
+    e.r += r;
+    e.g += g;
+    e.b += b;
+    buckets.set(key, e);
+    total++;
+  }
+  let best: { n: number; r: number; g: number; b: number } | null = null;
+  for (const e of buckets.values()) if (!best || e.n > best.n) best = e;
+  if (!best || best.n < total * 0.3) return;
+  const br = best.r / best.n, bg = best.g / best.n, bb = best.b / best.n;
+  const tol2 = tol * tol;
+  const isBg = (c: number) => {
+    if (alpha[c] <= 0.5) return true;
+    const dr = cells[c * 3] - br, dg = cells[c * 3 + 1] - bg, db = cells[c * 3 + 2] - bb;
+    return dr * dr + dg * dg + db * db <= tol2;
+  };
+  if (everywhere) {
+    for (let c = 0; c < gw * gh; c++) if (isBg(c)) alpha[c] = 0;
+    return;
+  }
+  const seen = new Uint8Array(gw * gh);
+  const stack: number[] = [];
+  for (const c of border) if (!seen[c] && isBg(c)) { seen[c] = 1; stack.push(c); }
+  while (stack.length) {
+    const c = stack.pop()!;
+    alpha[c] = 0;
+    const x = c % gw, y = (c / gw) | 0;
+    const nb = [x > 0 ? c - 1 : -1, x < gw - 1 ? c + 1 : -1, y > 0 ? c - gw : -1, y < gh - 1 ? c + gw : -1];
+    for (const d of nb) if (d >= 0 && !seen[d] && isBg(d)) { seen[d] = 1; stack.push(d); }
+  }
+}

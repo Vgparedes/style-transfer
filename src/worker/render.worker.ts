@@ -33,21 +33,21 @@ function prepare(recipe: RenderRecipe, k: number) {
   return { canvas, original, w, h, out };
 }
 
-function runEffect(recipe: RenderRecipe, original: RGBAImage, k: number): EffectResult {
+function runEffect(recipe: RenderRecipe, original: RGBAImage, k: number, wantVector = false): EffectResult {
   const effect = EFFECTS_BY_ID[recipe.effectId] ?? EFFECTS_BY_ID.none;
   const input = applyAdjustments(original, recipe.adjustments);
   const params = { ...effect.defaults, ...recipe.params };
-  return effect.render(input, params, { scale: k, background: recipe.background, original });
+  return effect.render(input, params, { scale: k, background: recipe.background, original, wantVector });
 }
 
 function rasterize(res: EffectResult, w: number, h: number, sceneScale = 1): OffscreenCanvas {
   const c = new OffscreenCanvas(w, h);
   const ctx = c.getContext('2d')!;
-  if (res.scene) {
-    drawScene(ctx, res.scene, sceneScale);
-  } else if (res.raster) {
+  if (res.raster) {
     const img = new ImageData(new Uint8ClampedArray(res.raster.data), res.raster.width, res.raster.height);
     ctx.putImageData(img, 0, 0);
+  } else if (res.scene) {
+    drawScene(ctx, res.scene, sceneScale);
   }
   return c;
 }
@@ -86,7 +86,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       if (format === 'svg') {
         const k = Math.min(1, SVG_PROCESS_MAX / Math.max(out.w, out.h));
         const prep = prepare(msg.recipe, k);
-        const res = runEffect(msg.recipe, prep.original, prep.w / out.w);
+        const res = runEffect(msg.recipe, prep.original, prep.w / out.w, true);
         if (!res.scene) throw new Error('Este efecto no tiene representación vectorial');
         const svg = sceneToSVG(res.scene, width, height);
         post({ type: 'exported', jobId: msg.jobId, blob: new Blob([svg], { type: 'image/svg+xml' }), info: res.info, ms: performance.now() - t0 });

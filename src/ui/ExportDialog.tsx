@@ -14,6 +14,7 @@ export function ExportDialog({ client }: { client: RenderClient }) {
   const set = useStore((s) => s.set);
   const effect = EFFECTS_BY_ID[doc.effectId];
   const vector = !!effect?.vector;
+  const canSvg = vector || !!effect?.svgExport;
   const out = source ? outputSize(source.width, source.height, doc.transform) : { w: 1, h: 1 };
 
   const [format, setFormat] = useState<ExportFormat>(vector ? 'svg' : 'png');
@@ -89,15 +90,17 @@ export function ExportDialog({ client }: { client: RenderClient }) {
             value={format}
             onChange={setFormat}
             options={[
-              { value: 'svg', label: 'SVG', title: vector ? 'Vectorial: escala sin pérdida' : 'Este estilo no es vectorial' },
+              { value: 'svg', label: 'SVG', title: 'Vectorial: escala sin pérdida' },
               { value: 'png', label: 'PNG' },
               { value: 'jpg', label: 'JPG' },
               { value: 'webp', label: 'WEBP' },
-            ].filter((o) => o.value !== 'svg' || vector) as { value: ExportFormat; label: string; title?: string }[]}
+            ].filter((o) => o.value !== 'svg' || canSvg) as { value: ExportFormat; label: string; title?: string }[]}
             hint={
               format === 'svg'
-                ? 'Vector real: cada punto/trazo es un elemento SVG. Ideal para web, escala sin perder calidad.'
-                : !vector
+                ? vector
+                  ? 'Vector real: cada punto/trazo es un elemento SVG. Ideal para web, escala sin perder calidad.'
+                  : 'Vectorizado: las formas se convierten en contornos SVG. Escala sin perder calidad.'
+                : !canSvg
                   ? `"${effect?.name}" es un estilo raster: SVG no disponible.`
                   : undefined
             }

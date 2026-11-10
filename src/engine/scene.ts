@@ -114,7 +114,7 @@ function drawLayer(ctx: Ctx2D, layer: SceneLayer, scale: number) {
         ctx.fillStyle = layer.fill;
         ctx.beginPath();
         forEachPath(p, layer.offsets, fillPath);
-        ctx.fill();
+        ctx.fill(layer.evenOdd ? 'evenodd' : 'nonzero');
       } else {
         const colors = layer.colors;
         forEachPath(p, layer.offsets, (s, e, k) => {
@@ -252,7 +252,7 @@ function layerToSVG(layer: SceneLayer): string {
       };
       if (!layer.colors) {
         // Un único path con todos los subcaminos: archivo más liviano.
-        out.push(`<g${groupAttrs(layer, ` fill="${layer.fill}"`)}>`);
+        out.push(`<g${groupAttrs(layer, ` fill="${layer.fill}"${layer.evenOdd ? ' fill-rule="evenodd"' : ''}`)}>`);
         const ds: string[] = [];
         forEachPath(p, layer.offsets, (s, e) => ds.push(pathD(s, e)));
         for (let i = 0; i < ds.length; i += 500) out.push(`<path d="${ds.slice(i, i + 500).join('')}"/>`);
